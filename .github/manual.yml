@@ -1,0 +1,63 @@
+name: CodeCertain
+description: Automated code quality report generation for each commit powered by CodeCertain
+run-name: Generating a report for your most pushed commit
+on:
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: 'Comma-separated list of paths to check (e.g., "**.java,**.py,**.cpp")'
+        required: true
+        default: '**.java,**.py,**.cpp'
+jobs:
+  Check-Paths-And-Generate-Report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Check for modified paths
+        id: check_paths
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            report:
+              - '${{ github.event.inputs.paths }}'
+      - name: Skip report generation if no relevant changes
+        if: steps.check_paths.outputs.report != 'true'
+        run: echo "No relevant changes in .java, .py, or .cpp files. Skipping report generation."
+        # If relevant changes are found, continue with your existing steps to generate and push the report.
+      - name: Formatting Variables
+        if: steps.check_paths.outputs.report == 'true'
+        run: echo "BRANCH=$(echo $GITHUB_REF_NAME | sed 's/\//\%SL/g')" >> $GITHUB_ENV
+      - name: Analyze Commit
+        if: steps.check_paths.outputs.report == 'true'
+        id: dcp
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://dcp.codecertain.ai/data_create_predict/commit/$GITHUB_REPOSITORY/$BRANCH/$GITHUB_SHA/GitHub/${{ secrets.GITHUB_TOKEN }}/true/full"
+          method: 'GET'
+          contentType: 'application/json'
+          timeout: 900000
+      - name: ML Tools Code2Vec
+        if: steps.check_paths.outputs.report == 'true'
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://code2vec.codecertain.ai/mltools/code2vec/${{ fromJson(steps.dcp.outputs.response).message }}"
+          method: 'GET'
+          contentType: 'application/json'
+          timeout: 900000
+      - name: ML Tools SLMoC
+        if: steps.check_paths.outputs.report == 'true'
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://slmoc.codecertain.ai/mltools/slmoc/${{ fromJson(steps.dcp.outputs.response).message }}"
+          method: 'GET'
+          contentType: 'application/json'
+          timeout: 900000
+      - name: Generate Report
+        if: steps.check_paths.outputs.report == 'true'
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: "https://mlp.codecertain.ai/ml_predict/commit/$GITHUB_REPOSITORY/$BRANCH/$GITHUB_REPOSITORY/$BRANCH/GitHub/${{ secrets.GITHUB_TOKEN }}/$GITHUB_SHA/None/None/None/true/full/${{ fromJson(steps.dcp.outputs.response).message }}"
+          method: 'GET'
+          contentType: 'application/json'
+          timeout: 900000
